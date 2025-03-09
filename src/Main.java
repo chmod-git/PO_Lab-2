@@ -23,11 +23,40 @@ public class Main {
         min[1] = count;
     }
 
+    public static void parallelPrimitiveSync(int[] array, int startRow, int endRow, int[] min) {
+        int minLocal = min[0];
+        int count = 0;
+        for (int i = startRow; i < endRow; i++) {
+            synchronized (Main.class) {
+                if (array[i] < minLocal) {
+                    minLocal = array[i];
+                    count = 1;
+                } else if (array[i] == minLocal) {
+                    count++;
+                }
+            }
+        }
+
+        if (minLocal < min[0]) {
+            min[0] = minLocal;
+            min[1] = count;
+        } else if (minLocal == min[0]) {
+            min[1] += count;
+        }
+    }
+
     public static void main(String[] args) {
         int[] arraySizes = {10_000, 100_000, 1_000_000};
+        double[] primitiveSyncExecutionTimes = new double[arraySizes.length];
+        double[] atomicSyncExecutionTimes = new double[arraySizes.length];
+        int sizeIndex = 0;
 
         for (int arraySize : arraySizes) {
+            int numberOfRuns = 10;
+            int numberOfThreads = 5;
             int[] array = new int[arraySize];
+            int[] minResult = new int[]{Integer.MAX_VALUE, 0};
+            double totalTimePrimitiveSync = 0.0;
             double totalTimeNonParallel = 0.0;
 
             fillArray(array, arraySize);
@@ -45,6 +74,42 @@ public class Main {
             System.out.println("Minimum element: " + minNonParallel[0]);
             System.out.println("Minimum elements amount: " + minNonParallel[1]);
             System.out.printf("=== One thread without parallelization ===\nTotal Execution Time: %.5f seconds\n", totalTimeNonParallel);
+
+            for (int i = 0; i < numberOfRuns; i++) {
+                startTime = System.nanoTime();
+                Thread[] threads = new Thread[numberOfThreads];
+                int chunkSize = arraySize / numberOfThreads;
+
+                for (int threadIndex = 0; threadIndex < numberOfThreads; threadIndex++) {
+                    int startRow = threadIndex * chunkSize;
+                    int endRow = (threadIndex == numberOfThreads - 1) ? arraySize : (threadIndex + 1) * chunkSize;
+                    threads[threadIndex] = new Thread(() -> parallelPrimitiveSync(array, startRow, endRow, minResult));
+                    threads[threadIndex].start();
+                }
+
+                for (Thread thread : threads) {
+                    try {
+                        thread.join();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+
+                endTime = System.nanoTime();
+                totalTimePrimitiveSync += (endTime - startTime) / 1e9;
+                if (i != numberOfRuns - 1) minResult[1] = 0;
+            }
+
+            System.out.println("\nMinimum element: " + minResult[0]);
+            System.out.println("Minimum elements amount: " + minResult[1]);
+            System.out.printf("=== Primitives synchronization ===\nNumber of Threads: %d, Total Execution Time: %.5f seconds\n",
+                    numberOfThreads, (totalTimePrimitiveSync / numberOfRuns));
+
+            primitiveSyncExecutionTimes[sizeIndex] = totalTimePrimitiveSync / numberOfRuns;
+            sizeIndex++;
         }
+
+        PlotBuilder.plotBarGraph("Array Size vs Execution Time", "Array Size", "Execution Time (seconds)",
+                "Parallel Primitive Sync", arraySizes, primitiveSyncExecutionTimes, "Atomic Sync", arraySizes, atomicSyncExecutionTimes);
     }
 }
