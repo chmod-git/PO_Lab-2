@@ -37,11 +37,13 @@ public class Main {
             }
         }
 
-        if (minLocal < min[0]) {
-            min[0] = minLocal;
-            min[1] = count;
-        } else if (minLocal == min[0]) {
-            min[1] += count;
+        synchronized (min) {
+            if (minLocal < min[0]) {
+                min[0] = minLocal;
+                min[1] = count;
+            } else if (minLocal == min[0]) {
+                min[1] += count;
+            }
         }
     }
 
