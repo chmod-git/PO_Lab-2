@@ -45,6 +45,42 @@ public class Main {
         }
     }
 
+    public static void parallelAtomic(int[] array, int startRow, int endRow, AtomicInteger min, AtomicInteger count) {
+        int minLocal = min.get();
+        int counter = 0;
+        for (int i = startRow; i < endRow; i++) {
+            if (array[i] < minLocal) {
+                minLocal = array[i];
+                counter = 1;
+            } else if (array[i] == minLocal) {
+                counter++;
+            }
+        }
+
+        if (minLocal < min.get()) {
+            setAtomicValue(min, minLocal);
+            setAtomicValue(count, counter);
+        } else if (minLocal == min.get()) {
+            addAtomicValue(count, counter);
+        }
+    }
+
+    public static void addAtomicValue(AtomicInteger valueOld, int increment) {
+        int expectedCount = valueOld.get();
+        int newCount = expectedCount + increment;
+        while (!valueOld.compareAndSet(expectedCount, newCount)) {
+            expectedCount = valueOld.get();
+            newCount = expectedCount + increment;
+        }
+    }
+
+    public static void setAtomicValue(AtomicInteger valueOld, int newValue) {
+        int oldValue = valueOld.get();
+        while (!valueOld.compareAndSet(oldValue, newValue)) {
+            oldValue = valueOld.get();
+        }
+    }
+
     public static void main(String[] args) {
         int[] arraySizes = {10_000, 100_000, 1_000_000};
         double[] primitiveSyncExecutionTimes = new double[arraySizes.length];
@@ -58,6 +94,7 @@ public class Main {
             int[] minResult = new int[]{Integer.MAX_VALUE, 0};
             double totalTimePrimitiveSync = 0.0;
             double totalTimeNonParallel = 0.0;
+            double totalTimeAtomicSync = 0.0;
 
             fillArray(array, arraySize);
 
@@ -105,7 +142,41 @@ public class Main {
             System.out.printf("=== Primitives synchronization ===\nNumber of Threads: %d, Total Execution Time: %.5f seconds\n",
                     numberOfThreads, (totalTimePrimitiveSync / numberOfRuns));
 
+            AtomicInteger atomicMinValue = new AtomicInteger(Integer.MAX_VALUE);
+            AtomicInteger atomicMinCount = new AtomicInteger(0);
+
+            for (int i = 0; i < numberOfRuns; i++) {
+                startTime = System.nanoTime();
+                Thread[] threads = new Thread[numberOfThreads];
+                int chunkSize = arraySize / numberOfThreads;
+
+                for (int threadIndex = 0; threadIndex < numberOfThreads; threadIndex++) {
+                    int startRow = threadIndex * chunkSize;
+                    int endRow = (threadIndex == numberOfThreads - 1) ? arraySize : (threadIndex + 1) * chunkSize;
+                    threads[threadIndex] = new Thread(() -> parallelAtomic(array, startRow, endRow, atomicMinValue, atomicMinCount));
+                    threads[threadIndex].start();
+                }
+
+                for (Thread thread : threads) {
+                    try {
+                        thread.join();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }
+
+                endTime = System.nanoTime();
+                totalTimeAtomicSync += (endTime - startTime) / 1e9;
+                if (i != numberOfRuns - 1) atomicMinCount.set(0);
+            }
+
+            System.out.println("\nMinimum element: " + atomicMinValue.get());
+            System.out.println("Minimum elements amount: " + atomicMinCount.get());
+            System.out.printf("=== Atomic synchronization ===\nNumber of Threads: %d, Total Execution Time: %.5f seconds\n",
+                    numberOfThreads, (totalTimeAtomicSync / numberOfRuns));
+
             primitiveSyncExecutionTimes[sizeIndex] = totalTimePrimitiveSync / numberOfRuns;
+            atomicSyncExecutionTimes[sizeIndex] = totalTimeAtomicSync / numberOfRuns;
             sizeIndex++;
         }
 
